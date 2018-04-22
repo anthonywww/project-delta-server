@@ -1,5 +1,6 @@
 ## Project files
 server.conf
+compiled.jar
 
 ## Generated binary output files
 bin/
