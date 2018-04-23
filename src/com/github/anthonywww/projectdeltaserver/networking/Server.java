@@ -2,7 +2,6 @@ package com.github.anthonywww.projectdeltaserver.networking;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
@@ -14,8 +13,6 @@ import java.util.Iterator;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-
-import com.github.anthonywww.projectdeltaserver.client.Client;
 
 public class Server {
 
@@ -108,7 +105,21 @@ public class Server {
 		// TODO: Log server shutdown
 	}
 	
+	/**
+	 * Get the current address the server is bound to
+	 * @return
+	 */
+	public String getAddress() {
+		return address;
+	}
 	
+	/**
+	 * Get the current port the server is running on
+	 * @return
+	 */
+	public int getPort() {
+		return port;
+	}
 
 	/**
 	 * Returns true if the server is running
@@ -160,7 +171,7 @@ public class Server {
 
 		// Accept the connection and make it non-blocking
 		SocketChannel socketChannel = serverSocketChannel.accept();
-		Socket socket = socketChannel.socket();
+		//Socket socket = socketChannel.socket();
 		socketChannel.configureBlocking(false);
 
 		// Register the new SocketChannel with our Selector, indicating we'd like to be notified when there's data waiting to be read

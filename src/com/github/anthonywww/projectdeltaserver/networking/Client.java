@@ -1,4 +1,4 @@
-package com.github.anthonywww.projectdeltaserver.client;
+package com.github.anthonywww.projectdeltaserver.networking;
 
 import java.net.Socket;
 
