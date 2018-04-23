@@ -19,14 +19,12 @@ public class ProjectDeltaServer {
 	
 	private static ProjectDeltaServer instance;
 	
-	private boolean running;
 	private HTerminal console;
 	private Configuration config;
 	private Server server;
 	
 	public ProjectDeltaServer(String[] args) {
 		instance = this;
-		this.running = true;
 		this.console = new HTerminal();
 		this.console.setPrompt(HTerminal.colorize("§e§lServer>§r "));
 		this.console.setLevel(Level.INFO);
@@ -55,7 +53,7 @@ public class ProjectDeltaServer {
 			@Override
 			public void userInterruptEvent() {
 				console.print(Level.FINE, "Caught ^C (SIGTERM), simulating 'exit' event ...");
-				running = false;
+				shutdown();
 			}
 		});
 		
@@ -73,20 +71,22 @@ public class ProjectDeltaServer {
 		configDefaults.put(ConfigKey.MAX_CLIENTS.id, "60");
 		configDefaults.put(ConfigKey.LOG_LEVEL.id, "INFO");
 		
-		this.config = new Configuration("/server.conf", configDefaults, configComment);
+		this.config = new Configuration("server.conf", configDefaults, configComment);
+		
+		// Set the console logger level to the configuration's value
+		this.console.setLevel(Level.parse(this.config.getAsString(ConfigKey.LOG_LEVEL.id)));
 		
 		
 		// Start the server
 		try {
+			print(Level.WARNING, "Starting internal server ...");
 			this.server = new Server(config.getAsString(ConfigKey.SERVER_ADDRESS.id), config.getAsInt(ConfigKey.SERVER_PORT.id));
 		} catch (IOException e) {
-			// FIXME: Handle exception
-			e.printStackTrace();
+			print(Level.WARNING, "Server initialization error!");
+			handleException(e);
+			shutdown(1);
 		}
-		
-		
 	}
-	
 	
 	public Configuration getConfiguration() {
 		return config;
@@ -95,6 +95,41 @@ public class ProjectDeltaServer {
 	
 	public Server getServer() {
 		return server;
+	}
+	
+	public void print(Level level, String msg) {
+		this.console.print(level, msg);
+	}
+	
+	public void shutdown() {
+		shutdown(0);
+	}
+	
+	private void shutdown(int status) {
+		if (this.server != null) {
+			this.server.shutdown();
+		}
+		if (this.config != null) {
+			this.config.save();
+		}
+		if (this.console != null) {
+			this.console.shutdown();
+		}
+		
+		System.exit(status);
+	}
+	
+	
+	public void handleException(Throwable t) {
+		if (this.console == null) {
+			t.printStackTrace();
+			return;
+		}
+		
+		this.console.print(Level.SEVERE, "---- BEGIN EXCEPTION ----");
+		this.console.print(Level.SEVERE, "Cause: " + t.getCause().toString());
+		this.console.print(Level.SEVERE, "Message: " + t.getMessage());
+		this.console.print(Level.SEVERE, "---- END EXCEPTION ----");
 	}
 	
 	

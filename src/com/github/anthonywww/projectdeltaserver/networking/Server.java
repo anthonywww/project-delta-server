@@ -13,6 +13,9 @@ import java.util.Iterator;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
+
+import com.github.anthonywww.projectdeltaserver.ProjectDeltaServer;
 
 public class Server {
 
@@ -73,6 +76,7 @@ public class Server {
 		
 		
 		// TODO: Log server started
+		ProjectDeltaServer.getInstance().print(Level.INFO, "Server started! (on " + address + ":" + port + ")");
 	}
 	
 	

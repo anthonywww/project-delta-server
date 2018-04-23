@@ -142,7 +142,7 @@ public class Configuration {
 	}
 	
 	private void handleException(Throwable t) {
-		t.printStackTrace();
+		ProjectDeltaServer.getInstance().handleException(t);
 	}
 	
 }

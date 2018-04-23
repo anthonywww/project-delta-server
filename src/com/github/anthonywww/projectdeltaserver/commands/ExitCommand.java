@@ -1,5 +1,9 @@
 package com.github.anthonywww.projectdeltaserver.commands;
 
+import java.util.logging.Level;
+
+import com.github.anthonywww.projectdeltaserver.ProjectDeltaServer;
+
 import net.hashsploit.hTerminal.ICLICommand;
 
 public class ExitCommand implements ICLICommand {
@@ -26,7 +30,8 @@ public class ExitCommand implements ICLICommand {
 
 	@Override
 	public void invoke(String[] arg0) {
-		
+		ProjectDeltaServer.getInstance().print(Level.INFO, "Shutting down ...");
+		ProjectDeltaServer.getInstance().shutdown();
 	}
 	
 	
