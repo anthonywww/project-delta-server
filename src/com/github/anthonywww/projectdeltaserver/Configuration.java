@@ -141,6 +141,7 @@ public class Configuration {
 		return defaults.get(key);
 	}
 	
+	
 	private void handleException(Throwable t) {
 		ProjectDeltaServer.getInstance().handleException(t);
 	}

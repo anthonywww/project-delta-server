@@ -25,9 +25,13 @@ public class ProjectDeltaServer {
 	
 	public ProjectDeltaServer(String[] args) {
 		instance = this;
+		
+		System.out.println(NAME + " v" + VERSION);
+		
 		this.console = new HTerminal();
 		this.console.setPrompt(HTerminal.colorize("§e§lServer>§r "));
 		this.console.setLevel(Level.INFO);
+		this.console.initialize();
 		
 		// Set up console
 		this.console.setInvalidCommandHandler(new IInvalidCommandHandler() {
@@ -58,10 +62,12 @@ public class ProjectDeltaServer {
 		});
 		
 		// Register CLI Commands
+		console.print(Level.INFO, "Loading components ...");
 		this.console.registerCommand(new ExitCommand());
 		
 		
 		// Load configuration file
+		console.print(Level.INFO, "Loading configuration file ...");
 		final String configComment = "# " + NAME + " v" + VERSION + " configuration file";
 		final HashMap<String, String> configDefaults = new HashMap<String, String>();
 		configDefaults.put(ConfigKey.SERVER_ADDRESS.id, "127.0.0.1");
@@ -79,7 +85,7 @@ public class ProjectDeltaServer {
 		
 		// Start the server
 		try {
-			print(Level.WARNING, "Starting internal server ...");
+			print(Level.INFO, "Starting internal server ...");
 			this.server = new Server(config.getAsString(ConfigKey.SERVER_ADDRESS.id), config.getAsInt(ConfigKey.SERVER_PORT.id));
 		} catch (IOException e) {
 			print(Level.WARNING, "Server initialization error!");
@@ -91,7 +97,6 @@ public class ProjectDeltaServer {
 	public Configuration getConfiguration() {
 		return config;
 	}
-	
 	
 	public Server getServer() {
 		return server;

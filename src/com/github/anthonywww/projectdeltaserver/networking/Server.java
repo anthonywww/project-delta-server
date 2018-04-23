@@ -2,6 +2,7 @@ package com.github.anthonywww.projectdeltaserver.networking;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
@@ -31,7 +32,7 @@ public class Server {
 		this.address = address;
 		this.port = port;
 		this.selector = initSelector();
-		this.readBuffer = ByteBuffer.allocateDirect(2048);
+		this.readBuffer = ByteBuffer.allocate(2048);
 		this.executorService = Executors.newFixedThreadPool(4);
 		this.clients = new HashSet<Client>();
 		
@@ -39,7 +40,7 @@ public class Server {
 		// Submit lambda task to executorService
 		this.executorService.submit(() -> {
 			try {
-				while (executorService.isShutdown() && selector.isOpen()) {
+				while (!executorService.isShutdown()) {
 					
 					// Wait for an event one of the registered channels
 					this.selector.select();
@@ -69,14 +70,12 @@ public class Server {
 					}
 				}
 			} catch (IOException e) {
-				// FIXME: Handle exception
-				e.printStackTrace();
+				ProjectDeltaServer.getInstance().handleException(e);
 			}
 		});
 		
 		
-		// TODO: Log server started
-		ProjectDeltaServer.getInstance().print(Level.INFO, "Server started! (on " + address + ":" + port + ")");
+		ProjectDeltaServer.getInstance().print(Level.INFO, "Server started! (on §a" + address + ":" + port + "§r)");
 	}
 	
 	
@@ -84,10 +83,9 @@ public class Server {
 	 * Shutdown the internal server
 	 */
 	public void shutdown() {
-		// TODO: Log server shutting down/terminating ...
+		ProjectDeltaServer.getInstance().print(Level.INFO, "Shutting down internal server ...");
 		// TODO: Broadcast disconnect packet to all active clients
 		// TODO: Disconnect all clients
-		
 		
 		
 		
@@ -105,8 +103,7 @@ public class Server {
 		// Clear clients
 		clients.clear();
 		
-		
-		// TODO: Log server shutdown
+		ProjectDeltaServer.getInstance().print(Level.INFO, "Internal server closed");
 	}
 	
 	/**
@@ -175,7 +172,10 @@ public class Server {
 
 		// Accept the connection and make it non-blocking
 		SocketChannel socketChannel = serverSocketChannel.accept();
-		//Socket socket = socketChannel.socket();
+		Socket socket = socketChannel.socket();
+		socket.setSoTimeout(10 * 1000);
+		socket.setTcpNoDelay(true);
+		
 		socketChannel.configureBlocking(false);
 
 		// Register the new SocketChannel with our Selector, indicating we'd like to be notified when there's data waiting to be read
@@ -186,7 +186,7 @@ public class Server {
 	
 	private void handleRead(SelectionKey key) throws IOException {
 		SocketChannel socketChannel = (SocketChannel) key.channel();
-
+		
 		// Clear out our read buffer so it's ready for new data
 		this.readBuffer.clear();
 
@@ -197,15 +197,18 @@ public class Server {
 			numRead = socketChannel.read(this.readBuffer);
 			
 		} catch (IOException e) {
+			ProjectDeltaServer.getInstance().print(Level.WARNING, "Force closed connection");
 			// The remote forcibly closed the connection, cancel the selection key and close the channel.
 			key.cancel();
 			socketChannel.close();
+			
 			// FIXME: If the connection was a client, remove them from the hashset and emit a disconnect event
 			return;
 		}
 
+		// Remote client shut the socket down cleanly. Do the same from our end and cancel the channel.
 		if (numRead == -1) {
-			// Remote entity shut the socket down cleanly. Do the same from our end and cancel the channel.
+			ProjectDeltaServer.getInstance().print(Level.WARNING, "read -1");
 			key.channel().close();
 			key.cancel();
 			return;
@@ -213,6 +216,8 @@ public class Server {
 
 		// Hand the data off to worker
 		//processData(this, socketChannel, this.readBuffer.array(), numRead);
+		
+		ProjectDeltaServer.getInstance().print(Level.INFO, socketChannel.getRemoteAddress() + ": " + new String(this.readBuffer.array()));
 	}
 	
 	
