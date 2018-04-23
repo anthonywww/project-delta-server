@@ -27,6 +27,8 @@ public class Server {
 	private ByteBuffer readBuffer;
 	private ExecutorService executorService;
 	private HashSet<Client> clients;
+	private int authTimeout;
+	private int connectionTimeout;
 
 	public Server(String address, int port) throws IOException {
 		this.address = address;
@@ -36,36 +38,39 @@ public class Server {
 		this.executorService = Executors.newFixedThreadPool(4);
 		this.clients = new HashSet<Client>();
 		
-		
+	}
+	
+	
+	public void start() {
 		// Submit lambda task to executorService
 		this.executorService.submit(() -> {
 			try {
 				while (!executorService.isShutdown()) {
-					
+
 					// Wait for an event one of the registered channels
 					this.selector.select();
-	
+
 					// Iterate over the set of keys for which events are available
 					Iterator<SelectionKey> selectedKeys = this.selector.selectedKeys().iterator();
-					
+
 					while (selectedKeys.hasNext()) {
-						
+
 						SelectionKey key = (SelectionKey) selectedKeys.next();
-						
+
 						// Remove the last key from the selectedKeys
 						selectedKeys.remove();
-	
+
 						if (!key.isValid()) {
 							continue;
 						}
-	
+
 						// Check what event is available and deal with it
 						if (key.isAcceptable()) {
 							this.handleAccept(key);
-							
+
 						} else if (key.isReadable()) {
 							this.handleRead(key);
-							
+
 						}
 					}
 				}
@@ -74,10 +79,8 @@ public class Server {
 			}
 		});
 		
-		
 		ProjectDeltaServer.getInstance().print(Level.INFO, "Server started! (on §a" + address + ":" + port + "§r)");
 	}
-	
 	
 	/**
 	 * Shutdown the internal server
@@ -104,6 +107,22 @@ public class Server {
 		clients.clear();
 		
 		ProjectDeltaServer.getInstance().print(Level.INFO, "Internal server closed");
+	}
+	
+	public void setAuthTimeout(int authTimeout) {
+		this.authTimeout = authTimeout;
+	}
+	
+	public int getAuthTimeout() {
+		return authTimeout;
+	}
+	
+	public void setConnectionTimeout(int connectionTimeout) {
+		this.connectionTimeout = connectionTimeout;
+	}
+	
+	public int getConnectionTimeout() {
+		return connectionTimeout;
 	}
 	
 	/**

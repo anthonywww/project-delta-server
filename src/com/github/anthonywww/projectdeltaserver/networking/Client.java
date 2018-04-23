@@ -8,13 +8,18 @@ public class Client implements IClient {
 	private SocketChannel socketChannel;
 	private String address;
 	private int port;
+	private boolean validated;
+	private long connectionStarted;
+	private long lastMessage;
 	
 	public Client(Server server, SocketChannel socketChannel) {
 		this.server = server;
 		this.socketChannel = socketChannel;
 		this.address = socketChannel.socket().getInetAddress().getHostAddress();
 		this.port = socketChannel.socket().getPort();
-		
+		this.validated = false;
+		this.connectionStarted = System.currentTimeMillis();
+		this.lastMessage = this.connectionStarted;
 		
 	}
 	

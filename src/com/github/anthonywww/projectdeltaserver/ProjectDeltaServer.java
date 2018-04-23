@@ -68,13 +68,18 @@ public class ProjectDeltaServer {
 		
 		// Load configuration file
 		console.print(Level.INFO, "Loading configuration file ...");
-		final String configComment = "# " + NAME + " v" + VERSION + " configuration file";
+		
+		final String configComment = "# " + NAME + " v" + VERSION + " configuration file\n"
+				+ "# auth_timeout = Max time in milliseconds for the client to authenticate, otherwise the connection is dropped\n"
+				+ "# connect_timeout = Max time in milliseconds between a 'heartbeat' otherwise the connection is dropped";
+		
 		final HashMap<String, String> configDefaults = new HashMap<String, String>();
 		configDefaults.put(ConfigKey.SERVER_ADDRESS.id, "127.0.0.1");
 		configDefaults.put(ConfigKey.SERVER_PORT.id, "11234");
-		configDefaults.put(ConfigKey.SERVER_HEARTBEAT.id, "3");
 		configDefaults.put(ConfigKey.SERVER_THREADS.id, "4");
 		configDefaults.put(ConfigKey.MAX_CLIENTS.id, "60");
+		configDefaults.put(ConfigKey.AUTH_TIMEOUT.id, "1000");
+		configDefaults.put(ConfigKey.CONNECTION_TIMEOUT.id, "3000");
 		configDefaults.put(ConfigKey.LOG_LEVEL.id, "INFO");
 		
 		this.config = new Configuration("server.conf", configDefaults, configComment);
@@ -142,12 +147,13 @@ public class ProjectDeltaServer {
 	 * Server Configuration keys
 	 */
 	public enum ConfigKey {
-		SERVER_ADDRESS("server-address"),
-		SERVER_PORT("server-port"),
-		SERVER_HEARTBEAT("server-heartbeat"),
-		SERVER_THREADS("server-threads"),
-		MAX_CLIENTS("max-clients"),
-		LOG_LEVEL("log-level");
+		SERVER_ADDRESS("server.address"),
+		SERVER_PORT("server.port"),
+		SERVER_THREADS("server.threads"),
+		MAX_CLIENTS("server.max_clients"),
+		AUTH_TIMEOUT("server.auth_timeout"),
+		CONNECTION_TIMEOUT("server.connection_timeout"),
+		LOG_LEVEL("server.log_level");
 		
 		public final String id;
 		
