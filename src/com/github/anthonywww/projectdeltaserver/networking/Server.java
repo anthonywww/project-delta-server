@@ -2,21 +2,24 @@ package com.github.anthonywww.projectdeltaserver.networking;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
-import java.nio.channels.spi.SelectorProvider;
+import java.nio.charset.Charset;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 
 import com.github.anthonywww.projectdeltaserver.ProjectDeltaServer;
+import com.sun.org.apache.bcel.internal.generic.RETURN;
 
 public class Server {
 
@@ -26,52 +29,77 @@ public class Server {
 	private Selector selector;
 	private ByteBuffer readBuffer;
 	private ExecutorService executorService;
+	private ScheduledExecutorService heartbeatService;
 	private HashSet<Client> clients;
 	private int authTimeout;
 	private int connectionTimeout;
-
+	private long lastHeartBeat;
+	private int maxClients;
+	
 	public Server(String address, int port) throws IOException {
 		this.address = address;
 		this.port = port;
-		this.selector = initSelector();
-		this.readBuffer = ByteBuffer.allocate(2048);
-		this.executorService = Executors.newFixedThreadPool(4);
+		this.readBuffer = ByteBuffer.allocate(4096);
+		this.executorService = Executors.newSingleThreadExecutor();
+		this.heartbeatService = Executors.newSingleThreadScheduledExecutor();
 		this.clients = new HashSet<Client>();
-		
+		this.lastHeartBeat = System.currentTimeMillis();
+		this.maxClients = ProjectDeltaServer.getInstance().getConfiguration().getAsInt(ProjectDeltaServer.ConfigKey.MAX_CLIENTS.id);
 	}
 	
 	
 	public void start() {
+		
+		// Initialize
+		try {
+			// Create a new selector
+			selector = Selector.open();
+	
+			// Create a new non-blocking server socket channel
+			serverChannel = ServerSocketChannel.open();
+			serverChannel.configureBlocking(false);
+	
+			// Bind the server socket to the specified address and port
+			InetSocketAddress isa = new InetSocketAddress(this.address, this.port);
+			serverChannel.socket().bind(isa);
+	
+			// Register the server socket channel, indicating an interest in accepting new connections
+			serverChannel.register(selector, SelectionKey.OP_ACCEPT);
+		} catch (IOException e) {
+			ProjectDeltaServer.getInstance().handleException(e);
+			return;
+		}
+		
+		// Submit a task to be periodically executed
+		heartbeatService.scheduleAtFixedRate(() -> {
+			heartbeat();
+		}, 0L, ProjectDeltaServer.getInstance().getConfiguration().getAsInt(ProjectDeltaServer.ConfigKey.HEARTBEAT_INTERVAL.id), TimeUnit.MILLISECONDS);
+		
 		// Submit lambda task to executorService
-		this.executorService.submit(() -> {
+		executorService.submit(() -> {
 			try {
 				while (!executorService.isShutdown()) {
-
+					
 					// Wait for an event one of the registered channels
-					this.selector.select();
+					selector.select();
 
 					// Iterate over the set of keys for which events are available
-					Iterator<SelectionKey> selectedKeys = this.selector.selectedKeys().iterator();
+					Set<SelectionKey> selectedKeys = selector.selectedKeys();
+					Iterator<SelectionKey> iterator = selectedKeys.iterator();
+					
+					while (iterator.hasNext()) {
 
-					while (selectedKeys.hasNext()) {
-
-						SelectionKey key = (SelectionKey) selectedKeys.next();
-
-						// Remove the last key from the selectedKeys
-						selectedKeys.remove();
-
-						if (!key.isValid()) {
-							continue;
-						}
-
-						// Check what event is available and deal with it
+						SelectionKey key = iterator.next();
+						
 						if (key.isAcceptable()) {
-							this.handleAccept(key);
-
-						} else if (key.isReadable()) {
-							this.handleRead(key);
-
+							register(selector, serverChannel);
 						}
+
+						if (key.isReadable()) {
+							handleRead(key);
+						}
+						
+						iterator.remove();
 					}
 				}
 			} catch (IOException e) {
@@ -85,16 +113,18 @@ public class Server {
 	/**
 	 * Shutdown the internal server
 	 */
-	public void shutdown() {
+	public synchronized void shutdown() {
 		ProjectDeltaServer.getInstance().print(Level.INFO, "Shutting down internal server ...");
-		// TODO: Broadcast disconnect packet to all active clients
-		// TODO: Disconnect all clients
 		
-		
+		// Disconnect all clients
+		for(Client c : clients) {
+			c.disconnect();
+		}
 		
 		// Issue executorService shutdown
 		executorService.shutdownNow();
-
+		heartbeatService.shutdownNow();
+		
 		try {
 			if (!executorService.isTerminated()) {
 				executorService.awaitTermination(1000, TimeUnit.MILLISECONDS);
@@ -109,18 +139,155 @@ public class Server {
 		ProjectDeltaServer.getInstance().print(Level.INFO, "Internal server closed");
 	}
 	
+	
+	public synchronized void broadcast(PacketHeader header, byte[] payload) {
+		for (Client c : clients) {
+			c.send(header, payload);
+		}
+	}
+	
+	/**
+	 * Called periodically automatically
+	 */
+	private void heartbeat() {
+		int rate = (int) ((System.currentTimeMillis() - lastHeartBeat)/1e0);
+		lastHeartBeat = System.currentTimeMillis();
+		ProjectDeltaServer.getInstance().print(Level.FINEST, "Heartbeat! (" + rate + " ms) " + clients.size() + " clients connected.");
+		
+		// For each client
+		Iterator<Client> iterator = clients.iterator();
+		while (iterator.hasNext()) {
+			Client c = iterator.next();
+
+			// If the client is no longer connected, remove them
+			if (!c.getSocketChannel().isConnected()) {
+				iterator.remove();
+				//clients.remove(c);
+				continue;
+			}
+			
+			c.heartbeat();
+		}
+		
+	}
+	
+	
+	private void register(Selector selector, ServerSocketChannel serverChannel) throws IOException {
+		
+		// Accept the connection and make it non-blocking
+		SocketChannel clientChannel = serverChannel.accept();
+		
+		if (clients.size() >= maxClients) {
+			clientChannel.close();
+		}
+		
+		clientChannel.socket().setSoTimeout(connectionTimeout);
+		clientChannel.socket().setTcpNoDelay(true);
+		clientChannel.configureBlocking(false);
+
+		// Register the new SocketChannel with our Selector, indicating we'd like to be notified when there's data waiting to be read
+		clientChannel.register(selector, SelectionKey.OP_READ);
+		
+		ProjectDeltaServer.getInstance().print(Level.FINE, "Incoming connection (" + clientChannel.socket().getInetAddress().getHostAddress() + ":" + clientChannel.socket().getPort() + ")");
+		
+		this.clients.add(new Client(this, clientChannel));
+	}
+	
+	
+	private void handleRead(SelectionKey key) throws IOException {
+		SocketChannel clientChannel = (SocketChannel) key.channel();
+		
+		// Attempt to read off the channel
+		int numRead = -1;
+		
+		Client client = null;
+		
+		// Get the client instance by socket channel look-up
+		for (Client c : clients) {
+			if (c.getSocketChannel() == clientChannel) {
+				client = c;
+			}
+		}
+		
+		if (client == null) {
+			clientChannel.close();
+			return;
+		}
+		
+		// Clear the buffer
+		readBuffer.clear();
+		readBuffer.put(new byte[readBuffer.capacity()]);
+		readBuffer.clear();
+		
+		try {
+			numRead = clientChannel.read(readBuffer);
+		} catch (IOException e) {
+			// The remote peer forcibly closed the connection, cancel the selection key and close the channel.
+			ProjectDeltaServer.getInstance().print(Level.FINE, "Forcefully closed connection of client " + (client.isAuthenticated() ? ("[" + client.getLocationX() + "," + client.getLocationY() + "]") : "") + " (" + client.getAddress() + ":" + client.getPort() + "/" + client.getUUID() + ")");
+			client.disconnect();
+			return;
+		}
+
+		// Remote client shut the socket down. Do the same from our end and cancel the channel.
+		if (numRead == -1) {
+			ProjectDeltaServer.getInstance().print(Level.FINE, "Closed connection of client (" + client.getAddress() + ":" + client.getPort() + "/" + client.getUUID() + ")");
+			client.disconnect();
+			return;
+		}
+		
+		// Read the data in client
+		readBuffer.order(ByteOrder.BIG_ENDIAN);
+		client.read(readBuffer.array());
+		
+		// Flip to writing mode
+		//readBuffer.flip();
+		
+		// Clear
+		//readBuffer.clear();
+	}
+	
+	
+	public int getHeartBeatDelta() {
+		int delta = (int) ((System.currentTimeMillis() - lastHeartBeat)/1e0);
+		return delta;
+	}
+	
+	/**
+	 * Get the server MOTD tag for sending to the client
+	 * @return
+	 */
+	public byte[] getServerInfo() {
+		return new String(ProjectDeltaServer.NAME + "|" + ProjectDeltaServer.VERSION).getBytes(Charset.forName(Packet.CHARSET));
+	}
+	
+	/**
+	 * Set the timeout in milliseconds for clients to authenticate
+	 * @param authTimeout
+	 */
 	public void setAuthTimeout(int authTimeout) {
 		this.authTimeout = authTimeout;
 	}
 	
+	/**
+	 * Get the timeout in milliseconds that clients are required to authenticate within
+	 * @return
+	 */
 	public int getAuthTimeout() {
 		return authTimeout;
 	}
 	
+	/**
+	 * Set the timeout in milliseconds, for if a client does not send a 'heartbeat' within this recurring period, the connection is dropped
+	 * @param connectionTimeout
+	 */
 	public void setConnectionTimeout(int connectionTimeout) {
 		this.connectionTimeout = connectionTimeout;
 	}
 	
+	/**
+	 * Get the current timeout in milliseconds that clients must send a periodic 'heartbeat'
+	 * @return
+	 */
 	public int getConnectionTimeout() {
 		return connectionTimeout;
 	}
@@ -154,96 +321,8 @@ public class Server {
 	 * Get a HashSet of clients
 	 * @return
 	 */
-	public HashSet<Client> getClients() {
+	public synchronized HashSet<Client> getClients() {
 		return clients;
 	}
 	
-	
-	/**
-	 * Create the selector and non-blocking server socket channels
-	 * 
-	 * @return
-	 * @throws IOException
-	 */
-	private Selector initSelector() throws IOException {
-		// Create a new selector
-		Selector socketSelector = SelectorProvider.provider().openSelector();
-
-		// Create a new non-blocking server socket channel
-		this.serverChannel = ServerSocketChannel.open();
-		serverChannel.configureBlocking(false);
-
-		// Bind the server socket to the specified address and port
-		InetSocketAddress isa = new InetSocketAddress(this.address, this.port);
-		serverChannel.socket().bind(isa);
-
-		// Register the server socket channel, indicating an interest in accepting new connections
-		serverChannel.register(socketSelector, SelectionKey.OP_ACCEPT);
-
-		return socketSelector;
-	}
-	
-	
-	
-	private void handleAccept(SelectionKey key) throws IOException {
-		// For an accept to be pending the channel must be a server socket channel.
-		ServerSocketChannel serverSocketChannel = (ServerSocketChannel) key.channel();
-
-		// Accept the connection and make it non-blocking
-		SocketChannel socketChannel = serverSocketChannel.accept();
-		Socket socket = socketChannel.socket();
-		socket.setSoTimeout(10 * 1000);
-		socket.setTcpNoDelay(true);
-		
-		socketChannel.configureBlocking(false);
-
-		// Register the new SocketChannel with our Selector, indicating we'd like to be notified when there's data waiting to be read
-		socketChannel.register(this.selector, SelectionKey.OP_READ);
-	}
-	
-	
-	
-	private void handleRead(SelectionKey key) throws IOException {
-		SocketChannel socketChannel = (SocketChannel) key.channel();
-		
-		// Clear out our read buffer so it's ready for new data
-		this.readBuffer.clear();
-
-		// Attempt to read off the channel
-		int numRead = -1;
-		
-		try {
-			numRead = socketChannel.read(this.readBuffer);
-			
-		} catch (IOException e) {
-			ProjectDeltaServer.getInstance().print(Level.WARNING, "Force closed connection");
-			// The remote forcibly closed the connection, cancel the selection key and close the channel.
-			key.cancel();
-			socketChannel.close();
-			
-			// FIXME: If the connection was a client, remove them from the hashset and emit a disconnect event
-			return;
-		}
-
-		// Remote client shut the socket down cleanly. Do the same from our end and cancel the channel.
-		if (numRead == -1) {
-			ProjectDeltaServer.getInstance().print(Level.WARNING, "read -1");
-			key.channel().close();
-			key.cancel();
-			return;
-		}
-
-		// Hand the data off to worker
-		//processData(this, socketChannel, this.readBuffer.array(), numRead);
-		
-		ProjectDeltaServer.getInstance().print(Level.INFO, socketChannel.getRemoteAddress() + ": " + new String(this.readBuffer.array()));
-	}
-	
-	
-	
-	
-	
-	
-	
-
 }
